@@ -1,0 +1,16 @@
+<div class="bridge-panel">
+    <div class="row">
+        <span class="label">埠號</span>
+        <select v-model="selectedPort" :disabled="listening">
+            <option :value="6868">6868</option>
+            <option :value="6870">6870</option>
+            <option :value="6872">6872</option>
+        </select>
+    </div>
+    <div class="row">
+        <ui-button class="blue" :disabled="listening" @click="onStart">啟動 Bridge</ui-button>
+        <ui-button :disabled="!listening" @click="onStop">停止 Bridge</ui-button>
+    </div>
+    <div class="status">{{ statusText }}</div>
+    <div v-if="statusError" class="error">{{ statusError }}</div>
+</div>

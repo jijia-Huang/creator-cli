@@ -1,0 +1,33 @@
+#text {
+    color: var(--color-normal-contrast-weakest);
+    margin: auto;
+    width: 180px;
+}
+.counter {
+    text-align: center;
+}
+
+.bridge-panel {
+    padding: 12px;
+}
+.bridge-panel .row {
+    margin-bottom: 10px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.bridge-panel .label {
+    min-width: 48px;
+    color: var(--color-normal-contrast-weakest);
+}
+.bridge-panel select {
+    min-width: 80px;
+}
+.bridge-panel .status {
+    margin-top: 12px;
+    color: var(--color-normal-contrast-weak);
+}
+.bridge-panel .error {
+    margin-top: 8px;
+    color: var(--color-error);
+}

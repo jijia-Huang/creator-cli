@@ -1,0 +1,14 @@
+{
+  "name": "creator-cli",
+  "version": "1.0.0",
+  "description": "CreatorCLI — 全域指令列工具，透過 TCP 呼叫 Cocos Creator Editor Bridge。需搭配 creator-cli 擴充在編輯器內啟動 Bridge。",
+  "bin": {
+    "creator-cli": "./bin/creator-cli.js"
+  },
+  "keywords": ["cocos", "creator", "cli", "bridge", "editor"],
+  "author": "Jijia-Huang",
+  "license": "MIT",
+  "engines": {
+    "node": ">=14.0.0"
+  }
+}
