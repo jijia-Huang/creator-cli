@@ -240,6 +240,42 @@ export function requireSetPropertyParams(params: Record<string, unknown>): NodeR
 }
 
 /**
+ * prefab.instantiate 參數：prefab 必填（prefab 資源 uuid 或 assetPath）；parent 可選（節點 uuid 或 nodePath，省略則掛在根節點下）。
+ */
+export function requirePrefabInstantiateParams(params: Record<string, unknown>): (
+    { prefabUuid: string; parent?: string } | { prefabUuid: string; parentPath: string } | { prefabAssetPath: string; parent?: string } | { prefabAssetPath: string; parentPath: string }
+) {
+    if (params === null || typeof params !== 'object' || Array.isArray(params)) {
+        throwInvalidParams();
+    }
+    const prefabUuid = params.prefabUuid;
+    const prefabAssetPath = params.prefabAssetPath;
+    const hasPrefabUuid = isValidUuid(prefabUuid);
+    const hasPrefabPath = typeof prefabAssetPath === 'string' && prefabAssetPath.trim() !== '';
+    if (!hasPrefabUuid && !hasPrefabPath) {
+        throwInvalidParams();
+    }
+    if (hasPrefabUuid && hasPrefabPath) {
+        throwInvalidParams();
+    }
+    const parent = params.parent;
+    const parentPath = params.parentPath;
+    const hasParent = isValidUuid(parent);
+    const hasParentPath = typeof parentPath === 'string' && parentPath.trim() !== '' && !String(parentPath).startsWith('db:');
+    if (hasPrefabUuid) {
+        if (hasParent) return { prefabUuid: prefabUuid as string, parent: parent as string };
+        if (hasParentPath) return { prefabUuid: prefabUuid as string, parentPath: (parentPath as string).trim() };
+        return { prefabUuid: prefabUuid as string };
+    }
+    if (hasPrefabPath) {
+        if (hasParent) return { prefabAssetPath: (prefabAssetPath as string).trim(), parent: parent as string };
+        if (hasParentPath) return { prefabAssetPath: (prefabAssetPath as string).trim(), parentPath: (parentPath as string).trim() };
+        return { prefabAssetPath: (prefabAssetPath as string).trim() };
+    }
+    throwInvalidParams();
+}
+
+/**
  * prefab.create 參數：nodeUuid 或 nodePath 二選一（根節點）、assetPath 必填（新 prefab 資源路徑）。
  */
 export function requirePrefabCreateParams(params: Record<string, unknown>): (

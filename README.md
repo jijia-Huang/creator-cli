@@ -99,6 +99,7 @@ creator-cli init 6870
 | **prefab.query-node** | 查詢單一節點內容 |
 | **prefab.query-node-tree** | 查詢節點樹（可指定 tree / markdown / flat 格式） |
 | **prefab.restore** | 還原 Prefab |
+| **prefab.instantiate** | 將現有 prefab 複製進當前場景（可選父節點） |
 | **scene.open** | 開啟場景或 Prefab |
 | **scene.query-current** | 查詢目前場景狀態 |
 | **create-node** / **remove-node** | 建立或移除節點 |

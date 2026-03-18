@@ -5,8 +5,8 @@
 
 import { saveSceneAfterEdit } from './auto-save';
 import { nodePathToUuid } from './resolve-node';
-import { assetPathToPrefabUrl } from './resolve-asset';
-import { requireUuid, requireRestoreUuids, requirePrefabCreateParams } from './validate';
+import { assetPathToPrefabUrl, resolveAssetPath } from './resolve-asset';
+import { requireUuid, requireRestoreUuids, requirePrefabCreateParams, requirePrefabInstantiateParams } from './validate';
 import { normalizeTree } from './node-tree-normalize';
 
 declare const Editor: {
@@ -162,6 +162,71 @@ export async function handlePrefabCreate(params: Record<string, unknown>): Promi
             throw err;
         }
         return { uuid };
+    } catch (e) {
+        const { code, message } = toContractError(e);
+        const err = new Error(message) as Error & { code?: string };
+        err.code = code;
+        throw err;
+    }
+}
+
+/**
+ * prefab.get-editing-root：回傳目前編輯中文件（場景或 prefab）的編輯根節點 uuid 與 path，
+ * 供 create-node 等操作作為父節點使用，無需猜測階層（如 FGDeclareUI-scene）。
+ * Editor: Editor.Message.request('scene', 'query-node-tree') 不傳 uuid 取得完整樹，取正規化根。
+ * result: { uuid: string, path: string, name?: string }。空樹時拋出 ASSET_NOT_FOUND。
+ */
+export async function handleGetEditingRoot(_params: Record<string, unknown>): Promise<{ uuid: string; path: string; name?: string }> {
+    const Message = getEditorMessage();
+    try {
+        const raw = await Message.request('scene', 'query-node-tree');
+        const { tree } = normalizeTree(raw, {});
+        if (!tree.uuid || tree.uuid === '') {
+            const err = new Error('No editing root (empty scene or prefab)') as Error & { code?: string };
+            err.code = 'ASSET_NOT_FOUND';
+            throw err;
+        }
+        return {
+            uuid: tree.uuid,
+            path: tree.path,
+            ...(tree.name && { name: tree.name }),
+        };
+    } catch (e) {
+        const { code, message } = toContractError(e);
+        const err = new Error(message) as Error & { code?: string };
+        err.code = code;
+        throw err;
+    }
+}
+
+/**
+ * prefab.instantiate：將現有 prefab 實例化到當前場景（等同把 prefab 拖拉進場景）。
+ * params：prefabUuid 或 prefabAssetPath 二選一（必填）；parent 或 parentPath 可選（省略則掛在根節點下）。
+ * Editor: Editor.Message.request('scene', 'create-node', { parent?, assetUuid, type: 'cc.Prefab', unlinkPrefab: false })
+ * result: { uuid: string } 新節點 uuid。
+ */
+export async function handlePrefabInstantiate(params: Record<string, unknown>): Promise<{ uuid: string }> {
+    const parsed = requirePrefabInstantiateParams(params);
+    const prefabUuid = 'prefabUuid' in parsed ? parsed.prefabUuid : await resolveAssetPath(parsed.prefabAssetPath);
+    let parentUuid: string | undefined;
+    if ('parent' in parsed && parsed.parent !== undefined) {
+        parentUuid = parsed.parent;
+    } else if ('parentPath' in parsed && parsed.parentPath !== undefined) {
+        parentUuid = await nodePathToUuid(undefined, parsed.parentPath);
+    }
+    const Message = getEditorMessage();
+    try {
+        const options: Record<string, unknown> = {
+            assetUuid: prefabUuid,
+            type: 'cc.Prefab',
+            unlinkPrefab: false,
+        };
+        if (parentUuid !== undefined) {
+            options.parent = parentUuid;
+        }
+        const uuid = await Message.request('scene', 'create-node', options);
+        saveSceneAfterEdit();
+        return { uuid: typeof uuid === 'string' ? uuid : String(uuid) };
     } catch (e) {
         const { code, message } = toContractError(e);
         const err = new Error(message) as Error & { code?: string };

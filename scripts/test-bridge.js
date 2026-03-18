@@ -43,10 +43,9 @@ function isUuid(s) {
     return typeof s === 'string' && /^[0-9a-fA-F]{32}$/.test(s);
 }
 
-/** 接受 32 位 hex 或 Creator 編輯器常見的 base64 格式 id（如 94J+/w4TRPUp6cT70I/HBi） */
-function isValidId(s) {
-    if (typeof s !== 'string' || s.length < 1 || s.length > 64 || /\s/.test(s)) return false;
-    return isUuid(s) || /^[A-Za-z0-9+/=-]+$/.test(s);
+/** Node ref: non-empty string, length <= 1024 (uuid or nodePath including "/"). */
+function isNodeRef(s) {
+    return typeof s === 'string' && s.length > 0 && s.length <= 1024;
 }
 
 function parseValue(s) {
@@ -120,47 +119,70 @@ if (arg === 'ping') {
     }
     request = { method: 'prefab.restore', params: { uuid } };
 } else if (arg === 'create-component') {
-    if (!uuid || !isValidId(uuid) || !extra) {
-        console.error('用法: node scripts/test-bridge.js create-component <節點uuid> <組件類名>');
+    if (!uuid || !isNodeRef(uuid) || !extra) {
+        console.error('用法: node scripts/test-bridge.js create-component <節點uuid|nodePath> <組件類名>');
         process.exit(1);
     }
-    request = { method: 'create-component', params: { uuid, component: extra } };
+    const ref = isUuid(uuid) ? { uuid } : { nodePath: uuid.trim() };
+    request = { method: 'create-component', params: { ...ref, component: extra } };
 } else if (arg === 'remove-component') {
-    if (!uuid || !isValidId(uuid)) {
+    if (!uuid || !isUuid(uuid)) {
         console.error('用法: node scripts/test-bridge.js remove-component <組件uuid>');
         process.exit(1);
     }
     request = { method: 'remove-component', params: { uuid } };
 } else if (arg === 'create-node') {
     const params = {};
-    if (uuid && isValidId(uuid)) params.parent = uuid;
+    if (uuid && isNodeRef(uuid)) {
+        if (isUuid(uuid)) params.uuid = uuid;
+        else params.nodePath = uuid.trim();
+    }
     if (extra) params.name = extra;
     request = { method: 'create-node', params };
 } else if (arg === 'remove-node') {
-    if (!uuid || !isValidId(uuid)) {
-        console.error('用法: node scripts/test-bridge.js remove-node <uuid> [uuid2 ...]');
+    if (!uuid) {
+        console.error('用法: node scripts/test-bridge.js remove-node <uuid|nodePath> [uuid2 ...]');
         process.exit(1);
     }
-    const uuids = [uuid];
-    for (let i = 2; i < argv.length; i++) {
-        if (isValidId(argv[i])) uuids.push(argv[i]);
+    if (argv.length === 1) {
+        if (!isNodeRef(uuid)) {
+            console.error('用法: node scripts/test-bridge.js remove-node <uuid|nodePath> [uuid2 ...]');
+            process.exit(1);
+        }
+        if (isUuid(uuid)) request = { method: 'remove-node', params: { uuid } };
+        else if (!uuid.startsWith('db:')) request = { method: 'remove-node', params: { nodePath: uuid.trim() } };
+        else {
+            console.error('用法: node scripts/test-bridge.js remove-node <uuid|nodePath> [uuid2 ...]');
+            process.exit(1);
+        }
+    } else {
+        const uuids = [uuid];
+        for (let i = 2; i < argv.length; i++) {
+            if (!isUuid(argv[i])) {
+                console.error('用法: node scripts/test-bridge.js remove-node <uuid|nodePath> [uuid2 ...] (多參數時僅接受 uuid)');
+                process.exit(1);
+            }
+            uuids.push(argv[i]);
+        }
+        request = { method: 'remove-node', params: uuids.length === 1 ? { uuid: uuids[0] } : { uuid: uuids } };
     }
-    request = { method: 'remove-node', params: uuids.length === 1 ? { uuid: uuids[0] } : { uuid: uuids } };
 } else if (arg === 'set-property') {
-    if (!uuid || !isValidId(uuid) || !extra) {
-        console.error('用法: node scripts/test-bridge.js set-property <uuid> <path> <value>');
+    if (!uuid || !isNodeRef(uuid) || !extra) {
+        console.error('用法: node scripts/test-bridge.js set-property <節點uuid|nodePath> <path> [value]');
         process.exit(1);
     }
+    const ref = isUuid(uuid) ? { uuid } : { nodePath: uuid.trim() };
     const value = parseValue(extra2);
-    const params = { uuid, path: extra };
+    const params = { ...ref, path: extra };
     if (value !== undefined) params.value = value;
     request = { method: 'set-property', params };
 } else if (arg === 'reset-property') {
-    if (!uuid || !isValidId(uuid) || !extra) {
-        console.error('用法: node scripts/test-bridge.js reset-property <uuid> <path>');
+    if (!uuid || !isNodeRef(uuid) || !extra) {
+        console.error('用法: node scripts/test-bridge.js reset-property <節點uuid|nodePath> <path>');
         process.exit(1);
     }
-    request = { method: 'reset-property', params: { uuid, path: extra } };
+    const ref = isUuid(uuid) ? { uuid } : { nodePath: uuid.trim() };
+    request = { method: 'reset-property', params: { ...ref, path: extra } };
 } else if (arg === 'editor.refresh') {
     request = { method: 'editor.refresh', params: {} };
 } else {

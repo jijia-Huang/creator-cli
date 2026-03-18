@@ -6,7 +6,7 @@
 
 import type { BridgeRequest, BridgeResponse } from './types';
 import * as net from 'net';
-import { handleQueryNode, handleQueryNodeTree, handleRestore, handlePrefabCreate } from './prefab-handlers';
+import { handleQueryNode, handleQueryNodeTree, handleRestore, handlePrefabCreate, handlePrefabInstantiate, handleGetEditingRoot } from './prefab-handlers';
 import { handleResolveNode } from './resolve-node';
 import { handleEditorRefresh } from './editor-handlers';
 import {
@@ -37,6 +37,8 @@ const METHOD_WHITELIST = new Set<string>([
     'prefab.query-node-tree',
     'prefab.restore',
     'prefab.create',
+    'prefab.instantiate',
+    'prefab.get-editing-root',
     'scene.open',
     'scene.query-current',
     'scene.create',
@@ -127,6 +129,14 @@ async function dispatch(req: BridgeRequest): Promise<BridgeResponse> {
         }
         if (req.method === 'prefab.create') {
             const result = await handlePrefabCreate(params);
+            return { id: req.id, ok: true, result };
+        }
+        if (req.method === 'prefab.instantiate') {
+            const result = await handlePrefabInstantiate(params);
+            return { id: req.id, ok: true, result };
+        }
+        if (req.method === 'prefab.get-editing-root') {
+            const result = await handleGetEditingRoot(params);
             return { id: req.id, ok: true, result };
         }
         if (req.method === 'scene.open') {

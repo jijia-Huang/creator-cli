@@ -57,6 +57,8 @@ creator-cli init 6870
 | **prefab.query-node-tree** | 查詢節點樹（tree / markdown / flat） |
 | **prefab.restore** | 還原節點為 prefab 狀態 |
 | **prefab.create** | 從節點建立 prefab |
+| **prefab.instantiate** | 將現有 prefab 複製進當前場景（可選父節點） |
+| **prefab.get-editing-root** | 回傳目前編輯中場景/prefab 的根節點 uuid 與 path |
 | **scene.open** | 開啟場景/prefab |
 | **scene.query-current** | 查詢當前場景狀態 |
 | **scene.create** | 建立新場景資源 |
@@ -166,6 +168,41 @@ creator-cli prefab.create <nodeUuid|nodePath> <assetPath>
 - 第一參數：節點 **uuid** 或 **nodePath**（作為 prefab 根）。
 - **assetPath**：新 prefab 路徑，可為 `db:assets/prefabs/MyPrefab` 或專案相對路徑。
 - 回傳 `{ "uuid": "<新 prefab 資源 uuid>" }`。成功後自動儲存。
+
+---
+
+### 3.7.5 prefab.instantiate
+
+```bash
+creator-cli prefab.instantiate <prefabUuid|prefabAssetPath> [parentUuid|parentPath]
+```
+
+- **第一參數**：prefab 資源 **uuid**（32 位 hex）或 **assetPath**（如 `db:assets/prefabs/MyPrefab`、專案相對路徑）。
+- **第二參數**（選填）：父節點 **uuid** 或 **nodePath**；省略則新節點掛在場景根節點下。
+- 效果：等同在編輯器裡把 prefab 從資源庫拖拉進場景，產生一個 prefab 實例。
+- 回傳 `{ "uuid": "<新節點 uuid>" }`。成功後自動儲存。
+
+範例：
+
+```bash
+# 將 prefab 複製到場景根節點下
+creator-cli prefab.instantiate db:assets/prefabs/Enemy
+
+# 指定父節點（路徑）
+creator-cli prefab.instantiate db:assets/prefabs/Item Root/Canvas/Content
+```
+
+---
+
+### 3.7.6 prefab.get-editing-root
+
+```bash
+creator-cli prefab.get-editing-root
+```
+
+- 無參數。回傳目前編輯中文件（場景或 prefab）的**編輯根節點**資訊：`{ "uuid": "...", "path": "...", "name": "..." }`（`name` 為選填）。
+- 供 **create-node** 等操作作為父節點使用，無需猜測階層。編輯 prefab 時根節點可能為包裝節點（例如 `...-scene`），本指令回傳的即為該根節點，agent 可直接以其 `uuid` 或 `path` 作為 create-node 的 parent。
+- 若目前無有效根節點（空樹），回傳錯誤碼 `ASSET_NOT_FOUND`。
 
 ---
 
@@ -290,7 +327,7 @@ creator-cli editor.refresh
 ### 4.2 資源路徑（db:）
 
 - 以 **`db:`** 或 **`db://`** 開頭、或專案相對路徑（如 **`assets/...`**）表示**資源**，Bridge 會解析為 uuid。
-- 用於：`scene.open`、`prefab.create`、`scene.create` 的 assetPath；`set-property` 的 value（貼圖、Prefab 引用等）。
+- 用於：`scene.open`、`prefab.create`、`prefab.instantiate`、`scene.create` 的 assetPath；`set-property` 的 value（貼圖、Prefab 引用等）。
 
 ### 4.3 組件 path（型別 path）
 
@@ -299,7 +336,7 @@ creator-cli editor.refresh
 
 ### 4.4 編輯後自動儲存
 
-- 會改動場景/prefab 的子命令（set-property、reset-property、create-node、remove-node、create-component、remove-component、prefab.restore、prefab.create、scene.create）**成功後**，Bridge 會自動呼叫儲存，CLI 不需再發 save。
+- 會改動場景/prefab 的子命令（set-property、reset-property、create-node、remove-node、create-component、remove-component、prefab.restore、prefab.create、prefab.instantiate、scene.create）**成功後**，Bridge 會自動呼叫儲存，CLI 不需再發 save。
 
 ---
 
@@ -318,7 +355,52 @@ creator-cli editor.refresh
 
 ---
 
-## 6. CLI 範例
+## 6. 常見問題與自動化須知
+
+### 6.1 常見路徑寫法與 ASSET_NOT_FOUND 排查
+
+**scene.open 常見可用寫法**
+
+- 可用 `db:assets/scenes/main`、`db:assets/prefabs/My.prefab` 等形式；**副檔名**依專案與資源類型而定（場景多數不加副檔名，prefab 常為 `.prefab`，以專案實際為準）。
+- 若專案有約定，也可使用以 **`assets/`** 開頭的專案相對路徑（如 `assets/scenes/main`），Bridge 會解析為資源。
+
+**出現 ASSET_NOT_FOUND 時**
+
+- **(1) 節點路徑或 uuid 錯誤**：先用 `resolve-node` 或 `prefab.query-node-tree` 確認節點路徑與 uuid 是否正確，再重試操作。
+- **(2) 資源路徑錯誤或未開啟**：檢查 `scene.open` 使用的路徑格式，以及是否已先開啟對應場景或 prefab（當前編輯中的資產須與要操作的資源一致）。
+
+### 6.2 自動化前建議步驟
+
+建議在跑自動化腳本前依序執行：
+
+1. **`creator-cli ping`** — 確認 Bridge 連線正常。
+2. **`creator-cli scene.query-current`** — 確認當前編輯中的場景或 prefab。
+3. 若要操作的資產與當前不符，先 **`creator-cli scene.open <路徑>`** 開啟正確場景或 prefab。
+4. 再執行後續指令（如 resolve-node、set-property、prefab.instantiate 等）。
+
+### 6.3 進階用法與劇本
+
+**綁定組件引用（如 @property(sp.Skeleton) 到子節點）**
+
+1. 用 **`resolve-node`** 取得子節點 uuid（或直接使用 nodePath）。
+2. 用 **`resolve-component`** 取得該節點上要設定的組件 uuid。
+3. 用 **`set-property`** 設定屬性，value 使用 **`{"__uuid__":"<目標節點或資源的 uuid>"}`** 格式；目標節點 uuid 可先以 **`prefab.query-node`** 或 **`prefab.query-node-tree`** 查詢。
+
+範例（將某節點的 Spine 組件指向子節點）：
+
+```bash
+creator-cli resolve-node Root/Canvas/Player/Skeleton
+creator-cli resolve-component Root/Canvas/Player MyScript
+creator-cli set-property Root/Canvas/Player MyScript.skeleton '{"__uuid__":"<子節點 Skeleton 的 uuid>"}'
+```
+
+**prefab.create 從暫時節點拉出**
+
+若從「別人 prefab 內的暫時節點」建立新 prefab，**母 prefab 會被改髒**（編輯狀態寫回該 prefab）。建議：建立完成後對該暫時節點執行 **`remove-node`** 清理；或改為先將節點複製到場景再對場景內節點執行 **prefab.create**，避免污染原 prefab。
+
+---
+
+## 7. CLI 範例
 
 ```bash
 # 設定預設埠號（之後不用再指定）
@@ -345,7 +427,7 @@ creator-cli editor.refresh
 
 ---
 
-## 7. 進階：協定與直接送 JSON
+## 8. 進階：協定與直接送 JSON
 
 CreatorCLI 底層為 **TCP**、**一行一筆 JSON**：連線 `127.0.0.1:<port>`，發送一行 JSON 請求、接收一行 JSON 回應。
 

@@ -78,6 +78,11 @@ function isUuid(s) {
     return typeof s === 'string' && /^[0-9a-fA-F]{32}$/.test(s);
 }
 
+/** Node ref: non-empty string, length <= 1024 (uuid or nodePath including "/"). */
+function isNodeRef(s) {
+    return typeof s === 'string' && s.length > 0 && s.length <= 1024;
+}
+
 function isValidId(s) {
     if (typeof s !== 'string' || s.length < 1 || s.length > 64 || /\s/.test(s)) return false;
     return isUuid(s) || /^[A-Za-z0-9+/=-]+$/.test(s);
@@ -137,8 +142,8 @@ const COMMANDS = {
         usage: 'creator-cli resolve-component <nodeUuid|nodePath> <component>',
         desc: '依節點與組件類名解析出組件 uuid（供 remove-component / set-property 用）',
         buildParams: (argv) => {
-            if (!argv[0] || !isValidId(argv[0]) || !argv[1]) return null;
-            const ref = isUuid(argv[0]) ? { uuid: argv[0] } : { nodePath: argv[0] };
+            if (!argv[0] || !isNodeRef(argv[0]) || !argv[1]) return null;
+            const ref = isUuid(argv[0]) ? { uuid: argv[0] } : { nodePath: argv[0].trim() };
             return { ...ref, component: argv[1] };
         },
     },
@@ -204,6 +209,27 @@ const COMMANDS = {
             return { nodePath: first, assetPath: argv[1] };
         },
     },
+    'prefab.instantiate': {
+        method: 'prefab.instantiate',
+        usage: 'creator-cli prefab.instantiate <prefabUuid|prefabAssetPath> [parentUuid|parentPath]',
+        desc: '將現有 prefab 複製進當前場景（可選父節點）',
+        buildParams: (argv) => {
+            if (!argv[0]) return null;
+            const prefab = argv[0];
+            const params = isUuid(prefab) ? { prefabUuid: prefab } : { prefabAssetPath: prefab };
+            if (argv[1] != null && argv[1] !== '') {
+                if (isUuid(argv[1])) params.parent = argv[1];
+                else params.parentPath = argv[1];
+            }
+            return params;
+        },
+    },
+    'prefab.get-editing-root': {
+        method: 'prefab.get-editing-root',
+        usage: 'creator-cli prefab.get-editing-root',
+        desc: '回傳目前編輯中場景/prefab 的根節點 uuid 與 path（供 create-node 父節點用）',
+        buildParams: () => ({}),
+    },
     'scene.open': {
         method: 'scene.open',
         usage: 'creator-cli scene.open <uuid|assetPath>',
@@ -238,8 +264,8 @@ const COMMANDS = {
         usage: 'creator-cli create-component <nodeUuid|nodePath> <component>',
         desc: '在節點上建立組件',
         buildParams: (argv) => {
-            if (!argv[0] || !isValidId(argv[0]) || !argv[1]) return null;
-            const ref = isUuid(argv[0]) ? { uuid: argv[0] } : { nodePath: argv[0] };
+            if (!argv[0] || !isNodeRef(argv[0]) || !argv[1]) return null;
+            const ref = isUuid(argv[0]) ? { uuid: argv[0] } : { nodePath: argv[0].trim() };
             return { ...ref, component: argv[1] };
         },
     },
@@ -248,7 +274,7 @@ const COMMANDS = {
         usage: 'creator-cli remove-component <componentUuid>',
         desc: '移除組件',
         buildParams: (argv) => {
-            if (!argv[0] || !isValidId(argv[0])) return null;
+            if (!argv[0] || !isUuid(argv[0])) return null;
             return { uuid: argv[0] };
         },
     },
@@ -272,12 +298,13 @@ const COMMANDS = {
         desc: '移除節點',
         buildParams: (argv) => {
             if (!argv[0]) return null;
-            if (argv.length === 1 && !isUuid(argv[0]) && typeof argv[0] === 'string' && argv[0].trim() && !argv[0].startsWith('db:')) {
-                return { nodePath: argv[0].trim() };
+            if (argv.length === 1 && isNodeRef(argv[0])) {
+                if (isUuid(argv[0])) return { uuid: argv[0] };
+                if (!argv[0].startsWith('db:')) return { nodePath: argv[0].trim() };
             }
             const uuids = [];
             for (let i = 0; i < argv.length; i++) {
-                if (!isValidId(argv[i])) return null;
+                if (!isUuid(argv[i])) return null;
                 uuids.push(argv[i]);
             }
             return uuids.length === 1 ? { uuid: uuids[0] } : { uuid: uuids };
@@ -288,7 +315,7 @@ const COMMANDS = {
         usage: 'creator-cli set-property <nodePath|uuid> <path> [value]',
         desc: '設定屬性；value 可為字串或 JSON（含 db: 資源路徑）',
         buildParams: (argv) => {
-            if (!argv[0] || !argv[1]) return null;
+            if (!argv[0] || !isNodeRef(argv[0]) || !argv[1]) return null;
             const ref = isUuid(argv[0]) ? { uuid: argv[0] } : { nodePath: argv[0].trim() };
             const value = parseValue(argv[2]);
             const params = { ...ref, path: argv[1] };
@@ -301,7 +328,7 @@ const COMMANDS = {
         usage: 'creator-cli reset-property <nodePath|uuid> <path>',
         desc: '重置屬性',
         buildParams: (argv) => {
-            if (!argv[0] || !argv[1]) return null;
+            if (!argv[0] || !isNodeRef(argv[0]) || !argv[1]) return null;
             const ref = isUuid(argv[0]) ? { uuid: argv[0] } : { nodePath: argv[0].trim() };
             return { ...ref, path: argv[1] };
         },
