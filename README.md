@@ -168,6 +168,10 @@ $env:CREATOR_CLI_PORT = "6870"
 
 若你要修改擴充原始碼或參與開發：
 
+**快速一鍵（Windows）**：在 `extensions/creator-cli` 目錄下雙擊 **`setup-build-cli.bat`**，會依序安裝依賴 → 編譯 → 同步 CLI → 本機全域安裝 `creator-cli`。若全域安裝出現權限錯誤，請以系統管理員身分執行該 bat。
+
+**手動步驟：**
+
 ```bash
 # 安裝依賴
 npm install

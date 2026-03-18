@@ -146,6 +146,18 @@ export function requireCreateComponentParams(params: Record<string, unknown>): N
 }
 
 /**
+ * 驗證 resolve-component 參數：節點為 uuid 或 nodePath 二選一、component（組件類名，如 cc.Sprite）。
+ */
+export function requireResolveComponentParams(params: Record<string, unknown>): NodeRef & { component: string } {
+    const ref = requireNodePathOrUuid(params);
+    const component = params.component;
+    if (typeof component !== 'string' || component.trim() === '') {
+        throwInvalidParams();
+    }
+    return { ...ref, component: component.trim() };
+}
+
+/**
  * 驗證 remove-component 參數：uuid 為組件 UUID（接受 32 hex 或 base64 格式）。
  */
 export function requireRemoveComponentParams(params: Record<string, unknown>): { uuid: string } {

@@ -52,6 +52,7 @@ creator-cli init 6870
 | **init** | 設定預設埠號並寫入 ~/.creator-cli.json |
 | **ping** | 檢查 Bridge 是否存活 |
 | **resolve-node** | 依節點路徑解析為 uuid |
+| **resolve-component** | 依節點與組件類名解析出組件 uuid（供 remove-component / set-property 用） |
 | **prefab.query-node** | 查詢單一節點 dump |
 | **prefab.query-node-tree** | 查詢節點樹（tree / markdown / flat） |
 | **prefab.restore** | 還原節點為 prefab 狀態 |
@@ -103,6 +104,24 @@ creator-cli resolve-node <path>
 - 回傳 `{ "uuid": "...", "path": "..." }`。
 
 亦可使用 `--parent <parentPath> --name <name>` 指定父路徑與節點名稱。
+
+---
+
+### 3.3.5 resolve-component
+
+```bash
+creator-cli resolve-component <nodeUuid|nodePath> <component>
+```
+
+- 第一參數：節點 **uuid** 或 **nodePath**（如 `Root/Canvas/Sprite`）。
+- **component**：組件類名，如 `cc.Sprite`、`PlayerController`（腳本 ccclass 名稱）。
+- 回傳 `{ "uuid": "<組件 uuid>" }`。可用於 **remove-component** 的 componentUuid，或需組件 uuid 的腳本／set-property 情境。
+
+範例：先解析節點上 `cc.Sprite` 的組件 uuid，再移除該組件：
+```bash
+COMP_UUID=$(creator-cli resolve-component Root/Canvas/Sprite cc.Sprite | node -e "const d=require('fs').readFileSync(0,'utf8'); console.log(JSON.parse(d).result.uuid)")
+creator-cli remove-component "$COMP_UUID"
+```
 
 ---
 

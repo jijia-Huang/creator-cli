@@ -66,3 +66,38 @@ export function resolveComponentPath(nodeDump: object, typePath: string): string
 
     return propSuffix ? `__comps__.${index}.${propSuffix}` : `__comps__.${index}`;
 }
+
+/** 從 IProperty 或直接值取出字串（與 node-tree-normalize 一致） */
+function getStr(prop: unknown): string {
+    if (prop == null) return '';
+    if (typeof prop === 'string') return prop;
+    if (typeof prop === 'object' && 'value' in prop && typeof (prop as { value: unknown }).value === 'string') {
+        return (prop as { value: string }).value;
+    }
+    return String(prop);
+}
+
+/**
+ * 依組件類型從節點 dump 的 __comps__ 中取得該組件的 UUID。
+ * 供 resolve-component 使用（remove-component、set-property 等需組件 UUID 時可先呼叫此方法）。
+ *
+ * @param nodeDump 節點 dump（含 __comps__ 陣列，來自 prefab.query-node）
+ * @param componentType 組件類名，如 "cc.Sprite"、"PlayerController"
+ * @returns 組件 UUID 字串，找不到時回傳 null
+ */
+export function getComponentUuid(nodeDump: object, componentType: string): string | null {
+    const comps = (nodeDump as Record<string, unknown>).__comps__;
+    if (!Array.isArray(comps)) return null;
+    const typeTrim = componentType.trim();
+    if (typeTrim === '') return null;
+
+    const index = findComponentIndex(comps, typeTrim);
+    if (index < 0) return null;
+
+    const c = comps[index];
+    if (c == null || typeof c !== 'object') return null;
+    const value = (c as Record<string, unknown>).value;
+    if (value == null || typeof value !== 'object' || !('uuid' in value)) return null;
+    const uuid = getStr((value as { uuid: unknown }).uuid);
+    return uuid || null;
+}

@@ -10,7 +10,7 @@
     },
     "scripts": {
         "preinstall": "node ./scripts/preinstall.js",
-        "build": "npx tsc",
+        "build": "npx --yes tsc",
         "cli": "node bin/creator-cli.js",
         "sync-cli-global": "node -e \"require('fs').copyFileSync('bin/creator-cli.js', 'creator-cli-global/bin/creator-cli.js')\""
     },

@@ -132,6 +132,16 @@ const COMMANDS = {
             return null;
         },
     },
+    'resolve-component': {
+        method: 'resolve-component',
+        usage: 'creator-cli resolve-component <nodeUuid|nodePath> <component>',
+        desc: '依節點與組件類名解析出組件 uuid（供 remove-component / set-property 用）',
+        buildParams: (argv) => {
+            if (!argv[0] || !isValidId(argv[0]) || !argv[1]) return null;
+            const ref = isUuid(argv[0]) ? { uuid: argv[0] } : { nodePath: argv[0] };
+            return { ...ref, component: argv[1] };
+        },
+    },
     'prefab.query-node': {
         method: 'prefab.query-node',
         usage: 'creator-cli prefab.query-node <uuid>',

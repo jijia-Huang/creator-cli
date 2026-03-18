@@ -5,13 +5,14 @@
  */
 
 import { saveSceneAfterEdit } from './auto-save';
-import { isResolvedComponentPath, resolveComponentPath } from './component-path';
+import { getComponentUuid, isResolvedComponentPath, resolveComponentPath } from './component-path';
 import { resolveAssetPath, assetPathToSceneUrl } from './resolve-asset';
 import { nodePathToUuid } from './resolve-node';
 import {
     requireCreateComponentParams,
     requireCreateNodeParams,
     requireRemoveComponentParams,
+    requireResolveComponentParams,
     requireRemoveNodeParams,
     requireResetPropertyParams,
     requireSceneCreateParams,
@@ -109,6 +110,37 @@ function getAtPath(obj: Record<string, unknown>, path: string): Record<string, u
         current = next;
     }
     return undefined;
+}
+
+/**
+ * resolve-component：依節點與組件類名解析出組件 UUID。供 remove-component、set-property 等使用。
+ * 先 query-node 取得節點 dump，再從 __comps__ 中依 type/cid/name 匹配取得組件 uuid。
+ */
+export async function handleResolveComponent(params: Record<string, unknown>): Promise<{ uuid: string }> {
+    const parsed = requireResolveComponentParams(params);
+    const nodeUuid = await resolveNodeUuid(parsed);
+    const Message = getEditorMessage();
+    let nodeDump: Record<string, unknown>;
+    try {
+        nodeDump = (await Message.request('scene', 'query-node', nodeUuid)) as Record<string, unknown>;
+    } catch (e) {
+        const { code, message } = toContractError(e);
+        const err = new Error(message) as Error & { code?: string };
+        err.code = code;
+        throw err;
+    }
+    if (!nodeDump || typeof nodeDump !== 'object') {
+        const err = new Error('Node not found') as Error & { code?: string };
+        err.code = 'ASSET_NOT_FOUND';
+        throw err;
+    }
+    const componentUuid = getComponentUuid(nodeDump, parsed.component);
+    if (componentUuid == null) {
+        const err = new Error(`Component "${parsed.component}" not found on node`) as Error & { code?: string };
+        err.code = 'ASSET_NOT_FOUND';
+        throw err;
+    }
+    return { uuid: componentUuid };
 }
 
 /**

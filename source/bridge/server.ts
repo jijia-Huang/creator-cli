@@ -15,6 +15,7 @@ import {
     handleRemoveComponent,
     handleRemoveNode,
     handleResetProperty,
+    handleResolveComponent,
     handleSceneCreate,
     handleSceneOpen,
     handleSceneQueryCurrent,
@@ -31,6 +32,7 @@ export const PORT_WHITELIST = [6868, 6870, 6872];
 const METHOD_WHITELIST = new Set<string>([
     'ping',
     'resolve-node',
+    'resolve-component',
     'prefab.query-node',
     'prefab.query-node-tree',
     'prefab.restore',
@@ -105,6 +107,10 @@ async function dispatch(req: BridgeRequest): Promise<BridgeResponse> {
     try {
         if (req.method === 'resolve-node') {
             const result = await handleResolveNode(params);
+            return { id: req.id, ok: true, result };
+        }
+        if (req.method === 'resolve-component') {
+            const result = await handleResolveComponent(params);
             return { id: req.id, ok: true, result };
         }
         if (req.method === 'prefab.query-node') {
