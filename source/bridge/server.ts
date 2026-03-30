@@ -6,7 +6,16 @@
 
 import type { BridgeRequest, BridgeResponse } from './types';
 import * as net from 'net';
-import { handleQueryNode, handleQueryNodeTree, handleRestore, handlePrefabCreate, handlePrefabInstantiate, handleGetEditingRoot } from './prefab-handlers';
+import {
+    handleQueryNode,
+    handleQueryNodeTree,
+    handleRestore,
+    handlePrefabCreate,
+    handlePrefabInstantiate,
+    handleGetEditingRoot,
+    handleNodeFind,
+    handlePrefabCopy,
+} from './prefab-handlers';
 import { handleResolveNode } from './resolve-node';
 import { handleEditorRefresh } from './editor-handlers';
 import {
@@ -20,6 +29,7 @@ import {
     handleSceneOpen,
     handleSceneQueryCurrent,
     handleSetProperty,
+    handleNodeDuplicate,
 } from './scene-handlers';
 
 /** 預設埠號（與藍圖一致） */
@@ -39,6 +49,9 @@ const METHOD_WHITELIST = new Set<string>([
     'prefab.create',
     'prefab.instantiate',
     'prefab.get-editing-root',
+    'prefab.copy',
+    'node.find',
+    'node.duplicate',
     'scene.open',
     'scene.query-current',
     'scene.create',
@@ -137,6 +150,18 @@ async function dispatch(req: BridgeRequest): Promise<BridgeResponse> {
         }
         if (req.method === 'prefab.get-editing-root') {
             const result = await handleGetEditingRoot(params);
+            return { id: req.id, ok: true, result };
+        }
+        if (req.method === 'prefab.copy') {
+            const result = await handlePrefabCopy(params);
+            return { id: req.id, ok: true, result };
+        }
+        if (req.method === 'node.find') {
+            const result = await handleNodeFind(params);
+            return { id: req.id, ok: true, result };
+        }
+        if (req.method === 'node.duplicate') {
+            const result = await handleNodeDuplicate(params);
             return { id: req.id, ok: true, result };
         }
         if (req.method === 'scene.open') {

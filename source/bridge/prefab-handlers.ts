@@ -6,7 +6,14 @@
 import { saveSceneAfterEdit } from './auto-save';
 import { nodePathToUuid } from './resolve-node';
 import { assetPathToPrefabUrl, resolveAssetPath } from './resolve-asset';
-import { requireUuid, requireRestoreUuids, requirePrefabCreateParams, requirePrefabInstantiateParams } from './validate';
+import {
+    requireNodeFindParams,
+    requireNodePathOrUuid,
+    requirePrefabCopyParams,
+    requirePrefabCreateParams,
+    requirePrefabInstantiateParams,
+    requireRestoreUuids,
+} from './validate';
 import { normalizeTree } from './node-tree-normalize';
 
 declare const Editor: {
@@ -38,14 +45,15 @@ function toContractError(e: unknown): { code: string; message: string } {
 }
 
 /**
- * prefab.query-node：查詢單一節點。
+ * prefab.query-node：查詢單一節點（uuid 或 nodePath）。
  * Editor: Editor.Message.request('scene', 'query-node', uuid)
  */
 export async function handleQueryNode(params: Record<string, unknown>): Promise<unknown> {
-    const uuid = requireUuid(params, 'uuid');
+    const ref = requireNodePathOrUuid(params);
+    const nodeUuid = 'uuid' in ref ? ref.uuid : await nodePathToUuid(undefined, ref.nodePath);
     const Message = getEditorMessage();
     try {
-        const result = await Message.request('scene', 'query-node', uuid);
+        const result = await Message.request('scene', 'query-node', nodeUuid);
         return result ?? null;
     } catch (e) {
         const { code, message } = toContractError(e);
@@ -111,11 +119,17 @@ export async function handleQueryNodeTree(params: Record<string, unknown>): Prom
 }
 
 /**
- * prefab.restore：還原節點為 prefab 狀態。支援單一 uuid 或 uuids 陣列。
+ * prefab.restore：還原節點為 prefab 狀態。支援單一 uuid、uuids 陣列，或單一 nodePath。
  * Editor: Editor.Message.request('scene', 'restore-prefab', { uuid }) 每顆節點各呼叫一次。
  */
 export async function handleRestore(params: Record<string, unknown>): Promise<{ restored: boolean }> {
-    const uuids = requireRestoreUuids(params);
+    const target = requireRestoreUuids(params);
+    let uuids: string[];
+    if (Array.isArray(target)) {
+        uuids = target;
+    } else {
+        uuids = [await nodePathToUuid(undefined, target.nodePath)];
+    }
     const Message = getEditorMessage();
     try {
         for (const uuid of uuids) {
@@ -233,4 +247,98 @@ export async function handlePrefabInstantiate(params: Record<string, unknown>): 
         err.code = code;
         throw err;
     }
+}
+
+function matchesPattern(str: string, pattern: string): boolean {
+    if (!pattern.includes('*')) return str.toLowerCase().includes(pattern.toLowerCase());
+    const regex = new RegExp(
+        '^' +
+            pattern
+                .split('*')
+                .map((s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+                .join('.*') +
+            '$',
+        'i'
+    );
+    return regex.test(str);
+}
+
+function dbUrlToDbColon(url: string): string {
+    if (url.startsWith('db://')) return 'db:' + url.slice('db://'.length).replace(/^\/+/, '');
+    return url;
+}
+
+/**
+ * node.find：依名稱與／或組件過濾 flat 節點列表。
+ */
+export async function handleNodeFind(params: Record<string, unknown>): Promise<unknown> {
+    const { name, component } = requireNodeFindParams(params);
+    const Message = getEditorMessage();
+    const raw = await Message.request('scene', 'query-node-tree');
+    if (raw === undefined || raw === null) {
+        const err = new Error('Node or scene not found') as Error & { code?: string };
+        err.code = 'ASSET_NOT_FOUND';
+        throw err;
+    }
+    const { flat } = normalizeTree(raw, {});
+    return flat.filter((node) => {
+        const nameMatch = !name || matchesPattern(node.name, name);
+        const compMatch =
+            !component || (node.components ?? []).some((c) => c.cid === component || c.name === component);
+        return nameMatch && compMatch;
+    });
+}
+
+/**
+ * prefab.copy：複製 prefab 資源。優先 asset-db copy-asset；失敗時拋出明確錯誤。
+ */
+export async function handlePrefabCopy(params: Record<string, unknown>): Promise<{ uuid: string; assetPath: string }> {
+    const parsed = requirePrefabCopyParams(params);
+    const Message = getEditorMessage();
+    let srcUrl: string;
+    if ('srcAssetPath' in parsed) {
+        srcUrl = assetPathToPrefabUrl(parsed.srcAssetPath);
+    } else {
+        let info: { url?: string; path?: string } | null = null;
+        try {
+            info = (await Message.request('asset-db', 'query-asset-info', parsed.srcUuid)) as { url?: string; path?: string } | null;
+        } catch {
+            // ignore
+        }
+        if (info?.url && typeof info.url === 'string') {
+            srcUrl = info.url;
+        } else if (info?.path && typeof info.path === 'string') {
+            const p = info.path;
+            srcUrl = p.startsWith('db://') ? p : 'db:///' + p.replace(/^\/+/, '');
+        } else {
+            const err = new Error(
+                'prefab.copy: cannot resolve source prefab URL from uuid (query-asset-info failed). Use db: source path.'
+            ) as Error & { code?: string };
+            err.code = 'ASSET_NOT_FOUND';
+            throw err;
+        }
+    }
+    const destUrl = assetPathToPrefabUrl(parsed.destAssetPath);
+    try {
+        await Message.request('asset-db', 'copy-asset', srcUrl, destUrl);
+    } catch (e1) {
+        const m1 = e1 instanceof Error ? e1.message : String(e1);
+        const err = new Error(
+            `prefab.copy: asset-db copy-asset is not available or failed. Use db: paths or duplicate in Editor. ${m1}`
+        ) as Error & { code?: string };
+        err.code = 'SCENE_ERROR';
+        throw err;
+    }
+    let newUuid: unknown;
+    try {
+        newUuid = await Message.request('asset-db', 'query-uuid', destUrl);
+    } catch {
+        newUuid = null;
+    }
+    if (!newUuid || typeof newUuid !== 'string') {
+        const err = new Error('prefab.copy: could not query new asset uuid after copy') as Error & { code?: string };
+        err.code = 'SCENE_ERROR';
+        throw err;
+    }
+    return { uuid: newUuid, assetPath: dbUrlToDbColon(destUrl) };
 }

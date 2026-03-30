@@ -11,6 +11,7 @@
     "scripts": {
         "preinstall": "node ./scripts/preinstall.js",
         "build": "npx --yes tsc",
+        "test": "node --test tests/validate.test.js tests/node-tree-markdown.test.js tests/cli-integration.test.js tests/skill-defaults.test.js",
         "cli": "node bin/creator-cli.js",
         "sync-cli-global": "node -e \"require('fs').copyFileSync('bin/creator-cli.js', 'creator-cli-global/bin/creator-cli.js')\""
     },

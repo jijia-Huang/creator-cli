@@ -6,11 +6,14 @@
 
 import { saveSceneAfterEdit } from './auto-save';
 import { getComponentUuid, isResolvedComponentPath, resolveComponentPath } from './component-path';
+import { normalizeTree } from './node-tree-normalize';
 import { resolveAssetPath, assetPathToSceneUrl } from './resolve-asset';
 import { nodePathToUuid } from './resolve-node';
+import type { NodeRef } from './validate';
 import {
     requireCreateComponentParams,
     requireCreateNodeParams,
+    requireNodeDuplicateParams,
     requireRemoveComponentParams,
     requireResolveComponentParams,
     requireRemoveNodeParams,
@@ -80,13 +83,23 @@ function isAssetPathValue(value: unknown): value is string {
     return s.startsWith('db:') || s.startsWith('db://') || s.startsWith('assets/');
 }
 
-/** 若 value 為物件且含 __uuid__，視為已是資源引用；否則若為資源路徑字串則解析為 { __uuid__ }。 */
+/** 若 value 為物件且含 __uuid__，視為已是資源引用；否則若為資源路徑字串則解析為 { __uuid__ }；@node: 解析為節點引用。 */
 async function normalizePropertyValue(value: unknown): Promise<unknown> {
     if (value !== null && typeof value === 'object' && !Array.isArray(value) && '__uuid__' in value && typeof (value as { __uuid__?: unknown }).__uuid__ === 'string') {
         return value;
     }
     if (isAssetPathValue(value)) {
         const uuid = await resolveAssetPath(value);
+        return { __uuid__: uuid };
+    }
+    if (typeof value === 'string' && value.startsWith('@node:')) {
+        const nodePath = value.slice(6).trim();
+        if (nodePath === '') {
+            const err = new Error('INVALID_PARAMS') as Error & { code?: string };
+            err.code = 'INVALID_PARAMS';
+            throw err;
+        }
+        const uuid = await nodePathToUuid(undefined, nodePath);
         return { __uuid__: uuid };
     }
     return value;
@@ -164,14 +177,42 @@ export async function handleCreateComponent(params: Record<string, unknown>): Pr
 }
 
 /**
- * remove-component：依組件 UUID 移除組件。
+ * remove-component：依組件 UUID，或 nodePath|節點 uuid + 組件類名移除組件。
  * Editor: Editor.Message.request('scene', 'remove-component', { uuid })
  */
 export async function handleRemoveComponent(params: Record<string, unknown>): Promise<null | Record<string, never>> {
-    const { uuid } = requireRemoveComponentParams(params);
+    const parsed = requireRemoveComponentParams(params);
     const Message = getEditorMessage();
+    let componentUuid: string;
+    if ('component' in parsed) {
+        const nodeRef = parsed as NodeRef & { component: string };
+        const nodeUuid = await resolveNodeUuid(nodeRef);
+        let nodeDump: Record<string, unknown>;
+        try {
+            nodeDump = (await Message.request('scene', 'query-node', nodeUuid)) as Record<string, unknown>;
+        } catch (e) {
+            const { code, message } = toContractError(e);
+            const err = new Error(message) as Error & { code?: string };
+            err.code = code;
+            throw err;
+        }
+        if (!nodeDump || typeof nodeDump !== 'object') {
+            const err = new Error('Node not found') as Error & { code?: string };
+            err.code = 'ASSET_NOT_FOUND';
+            throw err;
+        }
+        const cu = getComponentUuid(nodeDump, nodeRef.component);
+        if (cu == null) {
+            const err = new Error(`Component "${nodeRef.component}" not found on node`) as Error & { code?: string };
+            err.code = 'ASSET_NOT_FOUND';
+            throw err;
+        }
+        componentUuid = cu;
+    } else {
+        componentUuid = (parsed as { uuid: string }).uuid;
+    }
     try {
-        await Message.request('scene', 'remove-component', { uuid });
+        await Message.request('scene', 'remove-component', { uuid: componentUuid });
         saveSceneAfterEdit();
         return {};
     } catch (e) {
@@ -234,6 +275,85 @@ export async function handleRemoveNode(params: Record<string, unknown>): Promise
         err.code = code;
         throw err;
     }
+}
+
+function normalizePathSeg(p: string): string {
+    return p.replace(/\\/g, '/').replace(/\/+/g, '/').trim().replace(/^\//, '') || 'Root';
+}
+
+function parentPathFromNodePath(nodePath: string): string | null {
+    const n = normalizePathSeg(nodePath);
+    const i = n.lastIndexOf('/');
+    if (i <= 0) return null;
+    return n.slice(0, i);
+}
+
+async function resolveParentUuidForDuplicate(
+    Message: ReturnType<typeof getEditorMessage>,
+    sourceUuid: string
+): Promise<string | undefined> {
+    const rawTree = await Message.request('scene', 'query-node-tree');
+    const { flat } = normalizeTree(rawTree, {});
+    const item = flat.find((n) => n.uuid === sourceUuid);
+    if (!item) {
+        return undefined;
+    }
+    const pp = parentPathFromNodePath(item.path);
+    if (pp == null) {
+        return undefined;
+    }
+    const p = flat.find((n) => normalizePathSeg(n.path) === normalizePathSeg(pp));
+    return p?.uuid;
+}
+
+/**
+ * node.duplicate：copy-node + paste-node。若 Editor 未暴露對應 API 則拋出明確 SCENE_ERROR。
+ */
+export async function handleNodeDuplicate(params: Record<string, unknown>): Promise<{ uuid: string; path: string; name: string }> {
+    const parsed = requireNodeDuplicateParams(params);
+    const Message = getEditorMessage();
+    const sourceUuid = await resolveNodeUuid(parsed.source);
+    let parentUuid: string | undefined;
+    if (parsed.parent) {
+        parentUuid = await resolveNodeUuid(parsed.parent);
+    } else {
+        parentUuid = await resolveParentUuidForDuplicate(Message, sourceUuid);
+    }
+    try {
+        await Message.request('scene', 'copy-node', { uuid: sourceUuid });
+    } catch (e) {
+        const hint = e instanceof Error ? e.message : String(e);
+        const err = new Error(
+            `node.duplicate requires Editor scene.copy-node API. If this fails, your Creator version may not support non-interactive copy/paste: ${hint}`
+        ) as Error & { code?: string };
+        err.code = 'SCENE_ERROR';
+        throw err;
+    }
+    const pasteOpts: Record<string, unknown> = {};
+    if (parentUuid !== undefined) {
+        pasteOpts.parent = parentUuid;
+    }
+    if (parsed.name !== undefined) {
+        pasteOpts.name = parsed.name;
+    }
+    let newUuid: unknown;
+    try {
+        newUuid = await Message.request('scene', 'paste-node', pasteOpts);
+    } catch (e) {
+        const hint = e instanceof Error ? e.message : String(e);
+        const err = new Error(`node.duplicate paste-node failed: ${hint}`) as Error & { code?: string };
+        err.code = 'SCENE_ERROR';
+        throw err;
+    }
+    const newId = typeof newUuid === 'string' ? newUuid : String(newUuid);
+    const rawAfter = await Message.request('scene', 'query-node-tree');
+    const { flat } = normalizeTree(rawAfter, {});
+    const newItem = flat.find((n) => n.uuid === newId);
+    saveSceneAfterEdit();
+    if (!newItem) {
+        return { uuid: newId, path: '', name: parsed.name ?? '' };
+    }
+    return { uuid: newId, path: newItem.path, name: newItem.name };
 }
 
 /**

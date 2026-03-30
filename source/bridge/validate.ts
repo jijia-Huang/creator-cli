@@ -73,12 +73,23 @@ export function optionalNodePathOrUuid(params: Record<string, unknown>): {} | { 
     return {};
 }
 
+/** restore：單一／多個 uuid，或單一 nodePath（不含 db:） */
+export type RestoreUuidsInput = string[] | { nodePath: string };
+
 /**
- * 驗證 params 為 restore 用：either 單一 uuid 或 uuids 陣列；回傳 uuid 陣列。
+ * 驗證 params 為 restore 用：單一 uuid、uuids 陣列，或單一 nodePath。
  */
-export function requireRestoreUuids(params: Record<string, unknown>): string[] {
+export function requireRestoreUuids(params: Record<string, unknown>): RestoreUuidsInput {
     const uuid = params.uuid;
     const uuids = params.uuids;
+    const nodePath = params.nodePath;
+    const hasNodePath = typeof nodePath === 'string' && nodePath.trim() !== '' && !nodePath.startsWith('db:');
+    if (hasNodePath) {
+        if (isValidUuid(uuid) || (Array.isArray(uuids) && uuids.length > 0)) {
+            throwInvalidParams();
+        }
+        return { nodePath: (nodePath as string).trim() };
+    }
     if (isValidUuid(uuid)) {
         return [uuid];
     }
@@ -86,17 +97,13 @@ export function requireRestoreUuids(params: Record<string, unknown>): string[] {
         const out: string[] = [];
         for (const u of uuids) {
             if (!isValidUuid(u)) {
-                const err = new Error('INVALID_PARAMS') as Error & { code?: string };
-                err.code = 'INVALID_PARAMS';
-                throw err;
+                throwInvalidParams();
             }
             out.push(u);
         }
         return out;
     }
-    const err = new Error('INVALID_PARAMS') as Error & { code?: string };
-    err.code = 'INVALID_PARAMS';
-    throw err;
+    throwInvalidParams();
 }
 
 function throwInvalidParams(): never {
@@ -158,9 +165,15 @@ export function requireResolveComponentParams(params: Record<string, unknown>): 
 }
 
 /**
- * 驗證 remove-component 參數：uuid 為組件 UUID（接受 32 hex 或 base64 格式）。
+ * 驗證 remove-component：單一組件 uuid，或 nodePath|nodeUuid + component 類名。
  */
-export function requireRemoveComponentParams(params: Record<string, unknown>): { uuid: string } {
+export function requireRemoveComponentParams(
+    params: Record<string, unknown>
+): { uuid: string } | (NodeRef & { component: string }) {
+    const hasComponent = typeof params.component === 'string' && params.component.trim() !== '';
+    if (hasComponent) {
+        return { ...requireNodePathOrUuid(params), component: (params.component as string).trim() };
+    }
     return { uuid: requireCreatorId(params, 'uuid') };
 }
 
@@ -346,4 +359,67 @@ export function requireResetPropertyParams(params: Record<string, unknown>): Nod
         ...(hasDump ? { dump: params.dump as Record<string, unknown> } : {}),
         ...(typeof record === 'boolean' ? { record } : {}),
     };
+}
+
+/** node.find：至少 name 或 component 其一 */
+export function requireNodeFindParams(params: Record<string, unknown>): { name?: string; component?: string } {
+    const name = params.name;
+    const component = params.component;
+    const hasName = typeof name === 'string' && name.trim() !== '';
+    const hasComp = typeof component === 'string' && component.trim() !== '';
+    if (!hasName && !hasComp) {
+        throwInvalidParams();
+    }
+    return {
+        ...(hasName ? { name: (name as string).trim() } : {}),
+        ...(hasComp ? { component: (component as string).trim() } : {}),
+    };
+}
+
+/** node.duplicate：來源節點 uuid|nodePath；可選 parentUuid|parentPath、name */
+export function requireNodeDuplicateParams(params: Record<string, unknown>): {
+    source: NodeRef;
+    parent?: NodeRef;
+    name?: string;
+} {
+    const source = requireNodePathOrUuid(params);
+    const parentUuid = params.parentUuid;
+    const parentPath = params.parentPath;
+    let parent: NodeRef | undefined;
+    const hasPU = isValidUuid(parentUuid);
+    const hasPP = typeof parentPath === 'string' && parentPath.trim() !== '' && !parentPath.startsWith('db:');
+    if (hasPU && !hasPP) {
+        parent = { uuid: parentUuid as string };
+    } else if (hasPP && !hasPU) {
+        parent = { nodePath: (parentPath as string).trim() };
+    } else if (hasPU && hasPP) {
+        throwInvalidParams();
+    }
+    const name = params.name;
+    return {
+        source,
+        ...(parent !== undefined ? { parent } : {}),
+        ...(typeof name === 'string' && name.trim() !== '' ? { name: name.trim() } : {}),
+    };
+}
+
+/** prefab.copy：來源 uuid 或 assetPath；dest 必填 */
+export function requirePrefabCopyParams(params: Record<string, unknown>): { srcUuid: string; destAssetPath: string } | { srcAssetPath: string; destAssetPath: string } {
+    const destAssetPath = params.destAssetPath;
+    if (typeof destAssetPath !== 'string' || destAssetPath.trim() === '') {
+        throwInvalidParams();
+    }
+    const dest = destAssetPath.trim();
+    const srcUuid = params.srcUuid;
+    const srcAssetPath = params.srcAssetPath;
+    if (typeof srcAssetPath === 'string' && srcAssetPath.trim() !== '') {
+        if (isValidUuid(srcUuid)) {
+            throwInvalidParams();
+        }
+        return { srcAssetPath: srcAssetPath.trim(), destAssetPath: dest };
+    }
+    if (isValidUuid(srcUuid)) {
+        return { srcUuid: srcUuid as string, destAssetPath: dest };
+    }
+    throwInvalidParams();
 }

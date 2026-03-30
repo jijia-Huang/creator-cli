@@ -106,7 +106,11 @@ export function normalizeNode(
  * 將正規化樹轉成 markdown 字串（縮排表示層級）。
  */
 export function treeToMarkdown(node: NormalizedNode, indent = ''): string {
-    const self = `${indent}- ${node.name || node.uuid} (${node.path})`;
+    const compStr =
+        node.components && node.components.length > 0
+            ? ` [${node.components.map((c) => c.cid ?? c.name ?? '?').join(', ')}]`
+            : '';
+    const self = `${indent}- ${node.name || node.uuid}${compStr} (${node.path})`;
     const lines = [self];
     const childIndent = indent + '  ';
     for (const c of node.children) {

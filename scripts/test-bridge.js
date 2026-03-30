@@ -1,6 +1,10 @@
 /**
  * 手動測試 Bridge：送一筆 JSON 請求並印出回應。
  *
+ * 自動化測試（不需開啟 Creator；驗證 validate、treeToMarkdown、CLI 參數解析）：
+ *   npm test
+ *   node --test tests
+ *
  * 使用方式（可設環境變數 PORT，預設 6868）：
  *
  * 基本／錯誤：

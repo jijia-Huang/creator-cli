@@ -23,7 +23,7 @@ npm run cli -- <subcommand> [args...]
 
 - **nodePath**：場景階層路徑，如 `Root/Canvas/Sprite`（不加 `db:`）。
 - **uuid**：32 位 hex 或 Editor base64 id。
-- 支援 nodePath 的指令：第一個「節點」參數二選一。
+- 支援 nodePath 的指令：第一個「節點」參數二選一。**預設優先用 nodePath**；只有在對接舊流程或需要輸出 uuid 時才用 `resolve-node` / `resolve-component`。
 
 ### 資源路徑（db:）
 
@@ -37,7 +37,7 @@ npm run cli -- <subcommand> [args...]
 
 ### 自動儲存
 
-所有修改指令（set-property、reset-property、create-node、remove-node、create-component、remove-component、prefab.restore、prefab.create、prefab.instantiate、scene.create）成功後 Bridge **自動儲存**，無需額外指令。
+所有修改指令（set-property、reset-property、create-node、remove-node、create-component、remove-component、prefab.restore、prefab.create、prefab.instantiate、scene.create、node.duplicate）成功後 Bridge **自動儲存**，無需額外指令。唯讀類指令（如 `prefab.query-node-tree`、`node.find`）不寫入；`prefab.copy` 為資源庫操作，由 asset-db 持久化。
 
 ---
 
@@ -67,6 +67,7 @@ creator-cli resolve-node --parent <parentPath> --name <name>
 ```
 - **path**：節點路徑，如 `Root/Canvas/Sprite`。
 - 回傳 `{ "uuid": "...", "path": "..." }`。
+- 用途：把 nodePath 轉成 uuid（例如對接只收 uuid 的舊工具／舊腳本）。一般操作節點時不需要先 resolve。
 
 ---
 
@@ -77,6 +78,7 @@ creator-cli resolve-component <nodeUuid|nodePath> <component>
 - 第一參數：節點 **uuid** 或 **nodePath**（如 `Root/Canvas/Sprite`）。
 - **component**：組件類名，如 `cc.Sprite`、`PlayerController`（腳本 ccclass 名稱）。比對的是節點 dump 內 `__comps__` 的 type / cid / name，須與編輯器序列化結果一致。
 - 回傳 `{ "uuid": "<組件 uuid>" }`。用於 **remove-component** 或需組件 uuid 的腳本／set-property。
+- 用途：拿到「組件 uuid」，最常見於舊版單參數 `remove-component <componentUuid>`，或你手上只有 uuid 可傳。
 
 **若回傳 `ASSET_NOT_FOUND: Component "xxx" not found on node`**：表示該節點上沒有匹配的組件識別名。可先用 `resolve-node` 取節點 uuid，再 `prefab.query-node <uuid>` 看該節點的 `__comps__` 陣列，依其中 `value.type`、`cid` 或 `value.name` 傳入正確的 component 字串。
 
@@ -90,9 +92,10 @@ creator-cli remove-component "$COMP_UUID"
 
 ### prefab.query-node
 ```bash
-creator-cli prefab.query-node <uuid>
+creator-cli prefab.query-node <nodePath|uuid>
 ```
-- **uuid**：節點 UUID（32 位 hex）。
+- **nodePath**：場景階層路徑，如 `Root/Canvas/Sprite`（不需先 `resolve-node`）。
+- **uuid**：節點 UUID（32 位 hex 或編輯器 id）。
 - 回傳節點完整 dump（含所有屬性與組件）。
 
 ---
@@ -105,14 +108,15 @@ creator-cli prefab.query-node-tree limit <maxDepth> [maxChildren]
 - **format**（選填）：`tree` | `markdown` | `flat`；預設 `tree`。
 - **uuid**（選填）：根節點 UUID；省略為當前場景根。
 - `limit <maxDepth> [maxChildren]`：限制展開深度與每層子節點數。
+- **markdown**：每行節點名稱後方會列出組件摘要（`[cid, …]`，與 `flat` 之 `components` 對應）。
 
 ---
 
 ### prefab.restore
 ```bash
-creator-cli prefab.restore <uuid>
+creator-cli prefab.restore <nodePath|uuid>
 ```
-- **uuid**：要還原的節點 UUID。還原後自動儲存。
+- **nodePath** 或 **uuid**：要還原的節點（不需先 `resolve-node`）。還原後自動儲存。
 
 ---
 
@@ -157,6 +161,38 @@ creator-cli prefab.get-editing-root
 
 ---
 
+### node.find
+```bash
+creator-cli node.find --name <pattern>
+creator-cli node.find --component <cidOrName>
+creator-cli node.find --name <pattern> --component <cidOrName>
+```
+- **--name**：節點名稱部分比對（大小寫不敏感）；支援 `*` 萬用字元（如 `*Btn*`）。
+- **--component**：組件類型，比對 `cid` 或 `name`（如 `sp.Skeleton`、`cc.Button`）。
+- 至少須提供 **--name** 或 **--component** 其一。回傳符合條件的節點陣列（含 `uuid`、`path`、`name`、`depth`、`components`）。
+
+---
+
+### node.duplicate
+```bash
+creator-cli node.duplicate <sourcePath|sourceUuid> [parentPath|parentUuid] [--name <newName>]
+```
+- 在場景／Prefab 編輯中複製節點。未指定父節點時，貼上到與來源相同的父節點下。
+- 若目前 Creator 未暴露 `scene.copy-node` / `scene.paste-node`，Bridge 會回傳明確的 `SCENE_ERROR` 說明。
+- 成功後自動儲存。回傳 `{ "uuid", "path", "name" }`。
+
+---
+
+### prefab.copy
+```bash
+creator-cli prefab.copy <srcUuid|db:srcPath> <db:destPath>
+```
+- 複製 prefab 資源到新路徑；目標可省略 `.prefab` 副檔名（會自動補上）。
+- 若 `asset-db` 不支援 `copy-asset` 且無法以後援方式建立，會回傳明確錯誤。
+- 回傳 `{ "uuid", "assetPath" }`。
+
+---
+
 ### scene.open
 ```bash
 creator-cli scene.open <uuid|assetPath>
@@ -195,9 +231,11 @@ creator-cli create-component <nodeUuid|nodePath> <component>
 
 ### remove-component
 ```bash
+creator-cli remove-component <nodePath|nodeUuid> <component>
 creator-cli remove-component <componentUuid>
 ```
-- **componentUuid**：組件的 UUID（非節點 UUID）。可從 `prefab.query-node` 的 dump 取得，或使用 **resolve-component** 依節點路徑＋組件類名取得。
+- **兩參數**：節點路徑或節點 uuid + 組件類名（如 `cc.Sprite`），不需先 `resolve-component`。
+- **單參數（legacy）**：組件的 UUID（非節點 UUID）。可從 `prefab.query-node` 的 dump 或 **resolve-component** 取得。
 - 成功後自動儲存。
 
 ---
@@ -229,6 +267,7 @@ creator-cli set-property <nodePath|uuid> <path> [value]
 - **value**（選填）：
   - 字串 / 數字：直接傳入
   - 資源引用：`db:assets/textures/icon.png` → Bridge 解析為 `{ "__uuid__": "..." }`
+  - 節點引用：`@node:Root/Canvas/Player/Spine` → Bridge 解析為指向該節點的 `{ "__uuid__": "..." }`
   - JSON 物件：`{"__uuid__":"..."}` 等
 - 成功後自動儲存。
 
@@ -302,30 +341,52 @@ Exit code **1** = 指令錯誤；**2** = 連線錯誤。
 
 ---
 
-## 常用工作流程範例
+## UUID fallback / legacy（需要 uuid 時才用）
 
-### 初始化場景並查看結構
+這一節專門放「必須拿到 uuid」的流程：例如外部工具只收 uuid、或要走舊版單參數 `remove-component <componentUuid>`。
+
+### nodePath → node uuid（resolve-node）
+
 ```bash
-creator-cli scene.open db:assets/scenes/GameScene
-creator-cli prefab.query-node-tree markdown
+creator-cli resolve-node Root/Canvas/HpBar
 ```
 
-### 找到節點 uuid 後修改屬性（Bash / Unix）
-```bash
-UUID=$(creator-cli resolve-node Root/Canvas/HpBar | node -e "const d=require('fs').readFileSync('/dev/stdin','utf8'); console.log(JSON.parse(d).result.uuid)")
-creator-cli set-property $UUID name "HealthBar"
-```
-*Windows PowerShell 可改為：先執行 `creator-cli resolve-node Root/Canvas/HpBar` 取得輸出，再手動取 result.uuid 傳給 set-property。*
+Windows PowerShell 取值：
 
-### 批次建立節點並加組件
-```bash
-creator-cli create-node Root/Canvas UIPanel
-creator-cli create-component Root/Canvas/UIPanel cc.UITransform
-creator-cli create-component Root/Canvas/UIPanel cc.Sprite
+```powershell
+$result = creator-cli resolve-node Root/Canvas/HpBar | ConvertFrom-Json
+$nodeUuid = $result.result.uuid
 ```
 
-### 觸發編譯後開啟場景
+### node + component → component uuid（resolve-component）
+
 ```bash
-creator-cli editor.refresh
-creator-cli scene.open db:assets/scenes/main
+creator-cli resolve-component Root/Canvas/Sprite cc.Sprite
 ```
+
+Windows PowerShell 取值：
+
+```powershell
+$result = creator-cli resolve-component Root/Canvas/Sprite cc.Sprite | ConvertFrom-Json
+$compUuid = $result.result.uuid
+```
+
+### legacy：remove-component <componentUuid>
+
+```bash
+creator-cli remove-component <componentUuid>
+```
+
+PowerShell 範例（解析後立刻移除）：
+
+```powershell
+$result = creator-cli resolve-component Root/Canvas/Sprite cc.Sprite | ConvertFrom-Json
+creator-cli remove-component $result.result.uuid
+```
+
+### 常見坑：Component not found on node
+
+若 `resolve-component` 回傳 `ASSET_NOT_FOUND: Component "xxx" not found on node`：
+
+- 先用 `prefab.query-node <nodePath|uuid>` 看該節點 dump 內 `__comps__`
+- 以其中的 `value.type` / `cid` / `value.name` 作為 `<component>` 字串重試

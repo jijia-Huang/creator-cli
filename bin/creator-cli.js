@@ -91,6 +91,7 @@ function isValidId(s) {
 function parseValue(s) {
     if (s === undefined || s === '') return undefined;
     const t = String(s).trim();
+    if (t.startsWith('@node:')) return t;
     if ((t.startsWith('{') && t.endsWith('}')) || (t.startsWith('[') && t.endsWith(']'))) {
         try {
             return JSON.parse(t);
@@ -149,11 +150,13 @@ const COMMANDS = {
     },
     'prefab.query-node': {
         method: 'prefab.query-node',
-        usage: 'creator-cli prefab.query-node <uuid>',
-        desc: '查詢節點 dump（32 位 hex uuid）',
+        usage: 'creator-cli prefab.query-node <nodePath|uuid>',
+        desc: '查詢節點 dump（nodePath 或 32 位 hex uuid）',
         buildParams: (argv) => {
-            if (!argv[0] || !isUuid(argv[0])) return null;
-            return { uuid: argv[0] };
+            if (!argv[0]) return null;
+            if (isUuid(argv[0])) return { uuid: argv[0] };
+            if (!argv[0].startsWith('db:')) return { nodePath: argv[0].trim() };
+            return null;
         },
     },
     'prefab.query-node-tree': {
@@ -167,6 +170,9 @@ const COMMANDS = {
                 if (argv[1] && isUuid(argv[1])) params.uuid = argv[1];
             } else if (argv[0] === 'flat') {
                 params.format = 'flat';
+                if (argv[1] && isUuid(argv[1])) params.uuid = argv[1];
+            } else if (argv[0] === 'tree') {
+                params.format = 'tree';
                 if (argv[1] && isUuid(argv[1])) params.uuid = argv[1];
             } else if (argv[0] === 'limit') {
                 const depth = parseInt(argv[1], 10);
@@ -191,11 +197,13 @@ const COMMANDS = {
     },
     'prefab.restore': {
         method: 'prefab.restore',
-        usage: 'creator-cli prefab.restore <uuid>',
+        usage: 'creator-cli prefab.restore <nodePath|uuid>',
         desc: '還原節點為 prefab 狀態',
         buildParams: (argv) => {
-            if (!argv[0] || !isUuid(argv[0])) return null;
-            return { uuid: argv[0] };
+            if (!argv[0]) return null;
+            if (isUuid(argv[0])) return { uuid: argv[0] };
+            if (!argv[0].startsWith('db:')) return { nodePath: argv[0].trim() };
+            return null;
         },
     },
     'prefab.create': {
@@ -271,11 +279,15 @@ const COMMANDS = {
     },
     'remove-component': {
         method: 'remove-component',
-        usage: 'creator-cli remove-component <componentUuid>',
+        usage: 'creator-cli remove-component <componentUuid> | <nodePath|nodeUuid> <component>',
         desc: '移除組件',
         buildParams: (argv) => {
-            if (!argv[0] || !isUuid(argv[0])) return null;
-            return { uuid: argv[0] };
+            if (argv.length >= 2 && isNodeRef(argv[0]) && argv[1]) {
+                const ref = isUuid(argv[0]) ? { uuid: argv[0] } : { nodePath: argv[0].trim() };
+                return { ...ref, component: argv[1] };
+            }
+            if (argv.length === 1 && isValidId(argv[0])) return { uuid: argv[0] };
+            return null;
         },
     },
     'create-node': {
@@ -338,6 +350,56 @@ const COMMANDS = {
         usage: 'creator-cli editor.refresh',
         desc: '觸發編輯器編譯並等待完成',
         buildParams: () => ({}),
+    },
+    'node.find': {
+        method: 'node.find',
+        usage: 'creator-cli node.find --name <pattern> [--component <cid>]',
+        desc: '依節點名稱與／或組件過濾節點',
+        buildParams: (argv) => {
+            const params = {};
+            const ni = argv.indexOf('--name');
+            const ci = argv.indexOf('--component');
+            if (ni !== -1 && argv[ni + 1]) params.name = argv[ni + 1];
+            if (ci !== -1 && argv[ci + 1]) params.component = argv[ci + 1];
+            if (!params.name && !params.component) return null;
+            return params;
+        },
+    },
+    'node.duplicate': {
+        method: 'node.duplicate',
+        usage: 'creator-cli node.duplicate <sourcePath|sourceUuid> [parentPath|parentUuid] [--name <newName>]',
+        desc: '複製場景／Prefab 內節點',
+        buildParams: (argv) => {
+            const nameIdx = argv.indexOf('--name');
+            let newName;
+            let rest = argv.slice();
+            if (nameIdx !== -1) {
+                if (nameIdx + 1 >= rest.length) return null;
+                newName = rest[nameIdx + 1];
+                rest = rest.filter((_, i) => i !== nameIdx && i !== nameIdx + 1);
+            }
+            if (!rest[0]) return null;
+            const first = rest[0];
+            const params = isUuid(first) ? { uuid: first } : { nodePath: first.trim() };
+            if (rest[1]) {
+                const second = rest[1];
+                if (isUuid(second)) params.parentUuid = second;
+                else params.parentPath = second.trim();
+            }
+            if (newName) params.name = newName;
+            return params;
+        },
+    },
+    'prefab.copy': {
+        method: 'prefab.copy',
+        usage: 'creator-cli prefab.copy <srcUuid|db:srcPath> <db:destPath>',
+        desc: '複製 prefab 資源到新路徑',
+        buildParams: (argv) => {
+            if (!argv[0] || !argv[1]) return null;
+            const first = argv[0];
+            if (isUuid(first)) return { srcUuid: first, destAssetPath: argv[1] };
+            return { srcAssetPath: first, destAssetPath: argv[1] };
+        },
     },
 };
 
